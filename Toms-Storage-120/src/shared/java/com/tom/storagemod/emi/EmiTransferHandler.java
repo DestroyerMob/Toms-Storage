@@ -1,10 +1,9 @@
 package com.tom.storagemod.emi;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -90,38 +89,13 @@ public class EmiTransferHandler implements StandardRecipeHandler<CraftingTermina
 				).toArray(ItemStack[][]::new);
 
 		int width = recipe.getDisplayWidth();
-		List<Integer> missing = new ArrayList<>();
-		Set<StoredItemStack> stored = new HashSet<>(term.getStoredItems());
-		{
-			int i = 0;
-			for (ItemStack[] list : stacks) {
-				if(list.length > 0) {
-					boolean found = false;
-					for (ItemStack stack : list) {
-						if (stack != null && Minecraft.getInstance().player.getInventory().findSlotMatchingItem(stack) != -1) {
-							found = true;
-							break;
-						}
-					}
-
-					if (!found) {
-						for (ItemStack stack : list) {
-							StoredItemStack s = new StoredItemStack(stack);
-							if(stored.contains(s)) {
-								found = true;
-								break;
-							}
-						}
-					}
-
-					if (!found) {
-						missing.add(width == 1 ? i * 3 : width == 2 ? ((i % 2) + i / 2 * 3) : i);
-						//missing.add(i);
-					}
-				}
-				i++;
-			}
-		}
+		List<StoredItemStack> available = new ArrayList<>(term.getStoredItems());
+		screen.getMenu().slots.subList(1, screen.getMenu().slots.size()).stream()
+		.map(Slot::getItem)
+		.filter(stack -> !stack.isEmpty())
+		.map(StoredItemStack::new)
+		.forEach(available::add);
+		List<Integer> missing = findMissing(stacks, available, width);
 
 		if(!simulate) {
 			var recipeId = recipe.getId();
@@ -132,5 +106,59 @@ public class EmiTransferHandler implements StandardRecipeHandler<CraftingTermina
 			}
 		}
 		return missing;
+	}
+
+	static List<Integer> findMissing(ItemStack[][] ingredients, List<StoredItemStack> available, int width) {
+		int[] assignments = new int[ingredients.length];
+		int[] used = new int[available.size()];
+		Arrays.fill(assignments, -1);
+
+		List<Integer> missing = new ArrayList<>();
+		for (int i = 0; i < ingredients.length; i++) {
+			if (ingredients[i].length > 0 && !assignIngredient(i, ingredients, available, assignments, used,
+					new boolean[ingredients.length], new boolean[available.size()])) {
+				missing.add(width == 1 ? i * 3 : width == 2 ? ((i % 2) + i / 2 * 3) : i);
+			}
+		}
+		return missing;
+	}
+
+	private static boolean assignIngredient(int ingredient, ItemStack[][] ingredients, List<StoredItemStack> available,
+			int[] assignments, int[] used, boolean[] visitedIngredients, boolean[] visitedAvailable) {
+		if (visitedIngredients[ingredient]) {
+			return false;
+		}
+		visitedIngredients[ingredient] = true;
+
+		for (int i = 0; i < available.size(); i++) {
+			if (visitedAvailable[i] || !matches(ingredients[ingredient], available.get(i).getStack())) {
+				continue;
+			}
+			visitedAvailable[i] = true;
+
+			if (used[i] < available.get(i).getQuantity()) {
+				used[i]++;
+				assignments[ingredient] = i;
+				return true;
+			}
+
+			for (int j = 0; j < assignments.length; j++) {
+				if (assignments[j] == i && assignIngredient(j, ingredients, available, assignments, used,
+						visitedIngredients, visitedAvailable)) {
+					assignments[ingredient] = i;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean matches(ItemStack[] ingredient, ItemStack available) {
+		for (ItemStack option : ingredient) {
+			if (ItemStack.isSameItemSameTags(option, available)) {
+				return true;
+			}
+		}
+		return false;
 	}
 }
